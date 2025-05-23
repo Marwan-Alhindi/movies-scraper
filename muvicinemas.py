@@ -26,7 +26,7 @@ def get_movies_with_showtimes(day_text="23 May"):
             wait.until(EC.element_to_be_clickable((By.XPATH, "//div[.='Riyadh']"))).click()
             driver.find_element(By.XPATH, "//button[.='Select']").click()
             print("✅ Selected Riyadh")
-            time.sleep(1)
+            time.sleep(3)
         except:
             print("ℹ️ City popup skipped")
 
@@ -36,7 +36,7 @@ def get_movies_with_showtimes(day_text="23 May"):
                 btn.click()
                 print(f"✅ Selected day: {btn.text}")
                 break
-        time.sleep(0.5)
+        time.sleep(3)
 
         # 3) All Day
         for div in driver.find_elements(By.CSS_SELECTOR, 'div[class*="MuiBox-root"]'):
@@ -44,19 +44,19 @@ def get_movies_with_showtimes(day_text="23 May"):
                 driver.execute_script("arguments[0].click()", div)
                 print("✅ Clicked All Day")
                 break
-        time.sleep(0.5)
+        time.sleep(3)
 
         # 4) Show Results
         show_btn = wait.until(EC.element_to_be_clickable((By.ID, "show-results-button")))
         driver.execute_script("arguments[0].click()", show_btn)
         print("✅ Clicked Show Results")
-        time.sleep(1)
+        time.sleep(3)
 
         # 5) Scroll to load all movies
         last_h = driver.execute_script("return document.body.scrollHeight")
         while True:
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(0.5)
+            time.sleep(3)
             new_h = driver.execute_script("return document.body.scrollHeight")
             if new_h == last_h:
                 break
@@ -90,7 +90,7 @@ def get_movies_with_showtimes(day_text="23 May"):
 
             # — expand the accordion
             driver.execute_script("arguments[0].click()", summary)
-            time.sleep(0.5)  # wait for the collapse to open
+            time.sleep(3)  # wait for the collapse to open
 
             # — now find *that* movie’s collapse panel
             collapse = summary.find_element(
@@ -126,7 +126,7 @@ def get_movies_with_showtimes(day_text="23 May"):
 
             # — collapse it back
             driver.execute_script("arguments[0].click()", summary)
-            time.sleep(0.1)
+            time.sleep(3)
 
             movies.append({
                 "title":        title,
