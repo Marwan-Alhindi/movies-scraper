@@ -92,6 +92,10 @@ def get_movies_with_showtimes(day_text="24 May"):
                 "show_details": []
             })
 
+            # # print PASS 1 info
+            # print("PASS 1")
+            # print("==========================")
+            # print(movies[0])
         # — PASS 2: for each movie, expand and grab only the location names
         for idx in range(len(movies)):
             summary = driver.find_elements(By.CSS_SELECTOR, ".MuiAccordionSummary-root")[idx]
@@ -118,8 +122,12 @@ def get_movies_with_showtimes(day_text="24 May"):
             driver.execute_script("arguments[0].click()", summary)
             time.sleep(0.4)
 
-        print("ℹ️ PASS 2 done: locations collected")
-        print(movies)
+        # print("ℹ️ PASS 2 done: locations collected")
+        # # print PASS 2 info
+        # print("PASS 2")
+        # print("==========================")
+        # print(movies[0])
+        # print(movies)
         # — PASS 3: for each movie and each location, expand and grab cinema & times
         for idx in range(len(movies)):
             summary = driver.find_elements(By.CSS_SELECTOR, ".MuiAccordionSummary-root")[idx]
@@ -181,9 +189,71 @@ def get_movies_with_showtimes(day_text="24 May"):
                 for loc in locs
             ]
 
-            print("PASS 3 times_per_loc:", times_per_loc)
+        # # print PASS 1 info
+        # print("PASS 3")
+        # print("==========================")
+        # print(movies[0])
 
-        
+        # — PASS 4: for each movie, grab cinema names and merge with PASS 3 times
+        for idx in range(len(movies)):
+            # build a map of location → times from PASS 3
+            times_map = {
+                entry["location"]: entry["times"]
+                for entry in movies[idx]["show_details"]
+            }
+
+            # 1) scroll up & re-open this movie
+            driver.execute_script("window.scrollTo(0, 0);")
+            time.sleep(0.3)
+            summary = driver.find_elements(By.CSS_SELECTOR, ".MuiAccordionSummary-root")[idx]
+            driver.execute_script("arguments[0].scrollIntoView(true);", summary)
+            driver.execute_script("arguments[0].click()", summary)
+            time.sleep(0.8)
+
+            # 2) grab its details panel
+            collapse = summary.find_element(
+                By.XPATH,
+                "./following-sibling::div[contains(@class,'MuiCollapse-root')]"
+            )
+            details = collapse.find_element(By.CSS_SELECTOR, ".MuiAccordionDetails-root")
+
+            new_show = []
+            loc_groups = details.find_elements(By.CSS_SELECTOR, "div.MuiBox-root.css-6z6qye")
+
+            # 3) for each location, click each Read More to get the NAMES
+            for loc_name, lg in zip(movies[idx]["locations"], loc_groups):
+                cinema_names = []
+                for link in lg.find_elements(By.CSS_SELECTOR, "a.css-scsw1e"):
+                    # click via JS
+                    driver.execute_script("arguments[0].click()", link)
+                    dialog = wait.until(EC.visibility_of_element_located((By.XPATH, "//div[@role='dialog']")))
+                    name = dialog.find_element(By.CSS_SELECTOR, "h4.css-1n9xlo3").text.strip()
+                    # close via JS
+                    close_btn = dialog.find_element(By.XPATH, ".//button")
+                    driver.execute_script("arguments[0].click()", close_btn)
+                    wait.until(EC.invisibility_of_element_located((By.XPATH, "//div[@role='dialog']")))
+                    cinema_names.append(name)
+
+                # 4) zip names with the times list for this location
+                times_list = times_map.get(loc_name, [])
+                entries = [
+                    {"cinema": cn, "times": times_list[i] if i < len(times_list) else []}
+                    for i, cn in enumerate(cinema_names)
+                ]
+
+                new_show.append({
+                    "location": loc_name,
+                    "cinema":   entries
+                })
+
+            # 5) replace the old show_details and collapse back
+            movies[idx]["show_details"] = new_show
+            driver.execute_script("arguments[0].click()", summary)
+            time.sleep(0.4)
+
+        # print("PASS 4 complete: cinema names merged with PASS 3 times")
+        # print(movies[0])
+        return movies
     finally:
         driver.quit()
 
