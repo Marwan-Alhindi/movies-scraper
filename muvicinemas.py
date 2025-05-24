@@ -134,7 +134,7 @@ def get_movies_for_city(day_text, city_en, city_ar):
             idxs = [i for i, L in enumerate(lines) if L in loc_names]
             times_map = {}
             for i, loc in enumerate(loc_names):
-                seg = lines[idxs[i]+1 : (idxs[i+1] if i+1<len(idxs) else None)]
+                seg = lines[idxs[i]+1 : (idxs[i+1] if i+1 < len(idxs) else None)]
                 exps = []
                 cur  = []
                 for L in seg:
@@ -171,6 +171,79 @@ def get_movies_for_city(day_text, city_en, city_ar):
             # collapse
             driver.execute_script("arguments[0].click()", summary)
             time.sleep(0.5)
+
+        # — PASS 5: switch UI to Arabic, optionally re-select city in Arabic, then scrape Arabic titles
+
+        # 1) Go back to the English finder to open the hamburger
+        driver.get("https://www.muvicinemas.com/en/movie-finder")
+        time.sleep(2)
+        hamburger = wait.until(EC.element_to_be_clickable((
+            By.CSS_SELECTOR,
+            "button[aria-label='Menu'], button.css-10ygcul"
+        )))
+        driver.execute_script("arguments[0].click()", hamburger)
+        time.sleep(1)
+
+        # 2) Click “عربي” to switch the UI, if present
+        try:
+            arabic_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[text()='عربي']")))
+            driver.execute_script("arguments[0].click()", arabic_btn)
+            time.sleep(2)
+        except:
+            pass
+
+        # 3) (Optional) If the Arabic city-picker pops up again, choose the city in Arabic
+        try:
+            wait.until(EC.element_to_be_clickable((By.XPATH, f"//div[text()='{city_ar}']"))).click()
+            wait.until(EC.element_to_be_clickable((By.ID, "city-submit"))).click()
+            time.sleep(2)
+        except:
+            pass
+
+        # 4) Pick the same date by day number
+        target_day = day_text.split()[0]
+        for btn in driver.find_elements(By.CSS_SELECTOR, 'button[id^="movie-day-"]'):
+            spans = btn.find_elements(By.TAG_NAME, "span")
+            if len(spans) >= 2 and spans[1].text.strip() == target_day:
+                driver.execute_script("arguments[0].click()", btn)
+                break
+        time.sleep(2)
+
+        # 5) Click “جميع الأوقات” (All Day) filter if visible
+        try:
+            all_day = wait.until(EC.element_to_be_clickable((
+                By.XPATH,
+                "//p[text()='جميع الأوقات']/ancestor::div[contains(@class,'MuiBox-root')]"
+            )))
+            driver.execute_script("arguments[0].click()", all_day)
+            time.sleep(2)
+        except:
+            pass
+
+        # 6) Click “عرض النتائج” (Show Results)
+        show_btn = wait.until(EC.element_to_be_clickable((By.ID, "show-results-button")))
+        driver.execute_script("arguments[0].click()", show_btn)
+        time.sleep(2)
+
+        # 7) Scroll to load all movies
+        last_h = driver.execute_script("return document.body.scrollHeight")
+        while True:
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(2)
+            new_h = driver.execute_script("return document.body.scrollHeight")
+            if new_h == last_h:
+                break
+            last_h = new_h
+
+        # 8) Extract Arabic titles in the same order
+        arabic_titles = [
+            s.find_element(By.CSS_SELECTOR, "h1.MuiTypography-body1").text.strip()
+            for s in driver.find_elements(By.CSS_SELECTOR, ".MuiAccordionSummary-root")
+        ]
+
+        # 9) Merge into your existing movies list
+        for idx, movie in enumerate(movies):
+            movie["title"] = [arabic_titles[idx], movie["title"]]
 
         return movies
 
