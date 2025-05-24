@@ -92,8 +92,6 @@ def get_movies_with_showtimes(day_text="24 May"):
                 "show_details": []
             })
 
-        print("ℹ️ Static info collected")
-        print(movies)
         # — PASS 2: for each movie, expand and grab only the location names
         for idx in range(len(movies)):
             summary = driver.find_elements(By.CSS_SELECTOR, ".MuiAccordionSummary-root")[idx]
@@ -134,55 +132,58 @@ def get_movies_with_showtimes(day_text="24 May"):
                 "./following-sibling::div[contains(@class,'MuiCollapse-root')]"
             )
             details = collapse.find_element(By.CSS_SELECTOR, ".MuiAccordionDetails-root")
+            # We want to know three things:
+            # 1. summary - Summary is literally the box that contains the movie title, generes, rating, language and time
+            # 2. collapse - there seems to be no difference between collapse and details
+            # 3. details - there seems to be no difference between collapse and details
 
-            show_details = []
-            # we know the order of loc_groups matches movies[idx]['locations']
-            loc_groups = details.find_elements(By.CSS_SELECTOR, "div.MuiBox-root.css-6z6qye")
-            for lg, loc_name in zip(loc_groups, movies[idx]["locations"]):
-                experiences = []
-                # each cinema experience card under this loc_group
-                cards = lg.find_elements(
-                    By.XPATH,
-                    ".//div[contains(@class,'MuiBox-root') and .//button[starts-with(@id,'session-')]]"
-                )
-                for card in cards:
-                    # get cinema name from Read More dialog
-                    try:
-                        read_more = card.find_element(By.CSS_SELECTOR, "a.css-scsw1e")
-                        driver.execute_script("arguments[0].click()", read_more)
-                        dialog = wait.until(EC.visibility_of_element_located((By.XPATH, "//div[@role='dialog']")))
-                        cinema_name = dialog.find_element(By.TAG_NAME, "h4").text.strip()
-                        dialog.find_element(By.XPATH, ".//button").click()
-                        wait.until(EC.invisibility_of_element_located((By.XPATH, "//div[@role='dialog']")))
-                    except:
-                        cinema_name = "Unknown"
+            # print("Summary:")
+            # print(summary)
+            # print(summary.text)
+            # print("Collapse:")
+            # print(collapse)
+            # print(collapse.text)
+            # print("Details:")
+            # print(details)
+            # print(details.text)
+            
+            # PASS 3 – extract every “Read More” ↔ times chunk from collapse.text
+            lines = collapse.text.splitlines()
 
-                    # collect all show times
-                    times = [
-                        btn.find_element(By.TAG_NAME, "p").text.strip()
-                        for btn in card.find_elements(By.XPATH, ".//button[starts-with(@id,'session-')]")
-                        if btn.find_element(By.TAG_NAME, "p").text.strip()
-                    ]
+            locs = movies[idx]["locations"]
+            # find the line‐indices of each location name
+            loc_indices = [i for i, L in enumerate(lines) if L in locs]
 
-                    experiences.append({
-                        "cinema": cinema_name,
-                        "times":  times
-                    })
+            times_per_loc = {}
+            for i, loc in enumerate(locs):
+                start = loc_indices[i]
+                end   = loc_indices[i+1] if i+1 < len(loc_indices) else len(lines)
+                segment = lines[start+1:end]
 
-                show_details.append({
-                    "location": loc_name,
-                    "cinema":   experiences
-                })
+                # now split that segment by “Read More” markers
+                exp_times = []
+                current   = []
+                for line in segment:
+                    if line == "Read More":
+                        if current:
+                            exp_times.append(current)
+                        current = []
+                    elif "AM" in line or "PM" in line:
+                        current.append(line)
+                if current:
+                    exp_times.append(current)
 
-            movies[idx]["show_details"] = show_details
+                times_per_loc[loc] = exp_times
 
-            # collapse back
-            driver.execute_script("arguments[0].click()", summary)
-            time.sleep(0.4)
+            # attach to movies
+            movies[idx]["show_details"] = [
+                {"location": loc, "times": times_per_loc.get(loc, [])}
+                for loc in locs
+            ]
 
-        print("ℹ️ PASS 3 done: full show_details collected")
-        return movies
+            print("PASS 3 times_per_loc:", times_per_loc)
 
+        
     finally:
         driver.quit()
 
