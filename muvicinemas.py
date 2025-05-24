@@ -94,15 +94,40 @@ def get_movies_with_showtimes(day_text="24 May"):
 
         print("ℹ️ Static info collected")
         print(movies)
-        # — PASS 2: expand each accordion & scrape details
-        for movie in movies:
-            # locate the summary by title text
-            summary = wait.until(EC.element_to_be_clickable((
-                By.XPATH,
-                f"//h1[normalize-space(text())='{movie['title']}']/ancestor::div[contains(@class,'MuiAccordionSummary-root')]"
-            )))
+        # — PASS 2: for each movie, expand and grab only the location names
+        for idx in range(len(movies)):
+            summary = driver.find_elements(By.CSS_SELECTOR, ".MuiAccordionSummary-root")[idx]
+            driver.execute_script("arguments[0].scrollIntoView(true);", summary)
             driver.execute_script("arguments[0].click()", summary)
-            time.sleep(1)
+            time.sleep(0.8)
+
+            collapse = summary.find_element(
+                By.XPATH,
+                "./following-sibling::div[contains(@class,'MuiCollapse-root')]"
+            )
+            details = collapse.find_element(By.CSS_SELECTOR, ".MuiAccordionDetails-root")
+
+            locs = []
+            for loc_group in details.find_elements(By.CSS_SELECTOR, "div.MuiBox-root.css-6z6qye"):
+                try:
+                    name = loc_group.find_element(By.CSS_SELECTOR, "p.css-zgk7x3").text.strip()
+                except:
+                    name = "Unknown"
+                locs.append(name)
+            movies[idx]["locations"] = locs
+
+            # collapse back
+            driver.execute_script("arguments[0].click()", summary)
+            time.sleep(0.4)
+
+        print("ℹ️ PASS 2 done: locations collected")
+        print(movies)
+        # — PASS 3: for each movie and each location, expand and grab cinema & times
+        for idx in range(len(movies)):
+            summary = driver.find_elements(By.CSS_SELECTOR, ".MuiAccordionSummary-root")[idx]
+            driver.execute_script("arguments[0].scrollIntoView(true);", summary)
+            driver.execute_script("arguments[0].click()", summary)
+            time.sleep(0.8)
 
             collapse = summary.find_element(
                 By.XPATH,
@@ -111,24 +136,17 @@ def get_movies_with_showtimes(day_text="24 May"):
             details = collapse.find_element(By.CSS_SELECTOR, ".MuiAccordionDetails-root")
 
             show_details = []
-            for loc_group in details.find_elements(By.CSS_SELECTOR, "div.MuiBox-root.css-6z6qye"):
-                # 1) location
-                try:
-                    loc = loc_group.find_element(
-                        By.XPATH,
-                        ".//figure[.//img[@alt='Pin icon']]/following-sibling::p"
-                    ).text.strip()
-                except:
-                    loc = "Unknown"
-
-                # 2) each cinema experience
+            # we know the order of loc_groups matches movies[idx]['locations']
+            loc_groups = details.find_elements(By.CSS_SELECTOR, "div.MuiBox-root.css-6z6qye")
+            for lg, loc_name in zip(loc_groups, movies[idx]["locations"]):
                 experiences = []
-                exp_cards = loc_group.find_elements(
+                # each cinema experience card under this loc_group
+                cards = lg.find_elements(
                     By.XPATH,
                     ".//div[contains(@class,'MuiBox-root') and .//button[starts-with(@id,'session-')]]"
                 )
-                for card in exp_cards:
-                    # — click Read More to get cinema name
+                for card in cards:
+                    # get cinema name from Read More dialog
                     try:
                         read_more = card.find_element(By.CSS_SELECTOR, "a.css-scsw1e")
                         driver.execute_script("arguments[0].click()", read_more)
@@ -139,21 +157,30 @@ def get_movies_with_showtimes(day_text="24 May"):
                     except:
                         cinema_name = "Unknown"
 
-                    # — collect times
-                    times = [btn.find_element(By.TAG_NAME, "p").text.strip()
-                             for btn in card.find_elements(By.XPATH, ".//button[starts-with(@id,'session-')]")
-                             if btn.find_element(By.TAG_NAME, "p").text.strip()]
+                    # collect all show times
+                    times = [
+                        btn.find_element(By.TAG_NAME, "p").text.strip()
+                        for btn in card.find_elements(By.XPATH, ".//button[starts-with(@id,'session-')]")
+                        if btn.find_element(By.TAG_NAME, "p").text.strip()
+                    ]
 
-                    experiences.append({"cinema": cinema_name, "times": times})
+                    experiences.append({
+                        "cinema": cinema_name,
+                        "times":  times
+                    })
 
-                show_details.append({"location": loc, "cinema": experiences})
+                show_details.append({
+                    "location": loc_name,
+                    "cinema":   experiences
+                })
 
-            movie["show_details"] = show_details
+            movies[idx]["show_details"] = show_details
 
-            # collapse it back
+            # collapse back
             driver.execute_script("arguments[0].click()", summary)
-            time.sleep(0.5)
+            time.sleep(0.4)
 
+        print("ℹ️ PASS 3 done: full show_details collected")
         return movies
 
     finally:
