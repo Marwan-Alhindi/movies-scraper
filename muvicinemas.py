@@ -7,334 +7,180 @@ from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 import time
 
-def get_movies_with_showtimes(day_text="24 May"):
+# lists of city names in English and Arabic
+CITIES = [
+    ("Riyadh",       "الرياض"),
+    ("Jeddah",       "جدة"),
+    ("Dhahran",      "الظهران"),
+    ("Dammam",       "الدمام"),
+    ("Al Hofuf",     "الهفوف"),
+    ("Al Jubail",    "الجبيل"),
+    ("Buraydah",     "بريدة"),
+    ("Unayzah",      "عنيزة"),
+    # ("Taif",         "الطائف"),
+    # ("Khamis Mushait","خميس مشيط"),
+]
+
+def get_movies_for_city(day_text, city_en, city_ar):
+    # ————— set up Chrome with notifications disabled —————
     options = Options()
-    # options.add_argument("--headless")
     options.add_argument("--window-size=1920,1080")
+    # disable the push‐notification bar
+    options.add_argument("--disable-notifications")
+    options.add_experimental_option("prefs", {
+        "profile.default_content_setting_values.notifications": 2
+    })
 
     driver = webdriver.Chrome(
         service=Service(ChromeDriverManager().install()),
         options=options
     )
     wait = WebDriverWait(driver, 15)
+    movies = []
 
     try:
+        # ——————————————
+        # 1) load the EN finder and pick the city
         driver.get("https://www.muvicinemas.com/en/movie-finder")
 
-        # 1) City select
-        try:
-            wait.until(EC.element_to_be_clickable((By.XPATH, "//div[.='Riyadh']"))).click()
-            driver.find_element(By.XPATH, "//button[.='Select']").click()
-            print("✅ Selected Riyadh")
-            time.sleep(3)
-        except:
-            print("ℹ️ City popup skipped")
+        # wait for the city‐picker dialog title to show
+        wait.until(EC.visibility_of_element_located((By.ID, "cities-title")))
 
-        # 2) Pick date
+        # locate the <label> whose nested text is exactly our English city name
+        label_xpath = f"//label[.//div[text()='{city_en}']]"
+        wait.until(EC.element_to_be_clickable((By.XPATH, label_xpath))).click()
+
+        # click the “Select” button
+        wait.until(EC.element_to_be_clickable((By.ID, "city-submit"))).click()
+        time.sleep(2)
+
+        # ——————————————
+        # 2) pick the date
         for btn in driver.find_elements(By.CSS_SELECTOR, '[id^="movie-day-"]'):
             spans = btn.find_elements(By.TAG_NAME, "span")
             if len(spans) >= 3:
-                date_str = f"{spans[1].text.strip()} {spans[2].text.strip()}"
-                if date_str.lower() == day_text.lower():
+                if f"{spans[1].text} {spans[2].text}".lower() == day_text.lower():
                     btn.click()
-                    print(f"✅ Selected day: {date_str}")
                     break
-        time.sleep(3)
+        time.sleep(1)
 
-        # 3) All Day
+        # 3) click “All Day”
         for div in driver.find_elements(By.CSS_SELECTOR, 'div[class*="MuiBox-root"]'):
             if "all day" in div.text.lower():
                 driver.execute_script("arguments[0].click()", div)
-                print("✅ Clicked All Day")
                 break
-        time.sleep(3)
+        time.sleep(1)
 
-        # 4) Show Results
+        # 4) show results
         show_btn = wait.until(EC.element_to_be_clickable((By.ID, "show-results-button")))
         driver.execute_script("arguments[0].click()", show_btn)
-        print("✅ Clicked Show Results")
-        time.sleep(3)
+        time.sleep(2)
 
-        # 5) Scroll to load all movies
+        # 5) scroll to load
         last_h = driver.execute_script("return document.body.scrollHeight")
         while True:
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(3)
+            time.sleep(1)
             new_h = driver.execute_script("return document.body.scrollHeight")
             if new_h == last_h:
                 break
             last_h = new_h
 
-        # — PASS 1: collect static info
-        movies = []
+        # — PASS 1: static info
         summaries = driver.find_elements(By.CSS_SELECTOR, ".MuiAccordionSummary-root")
-        print(len(summaries), "movies found")
-        for summary in summaries:
-            title = summary.find_element(By.CSS_SELECTOR, "h1.MuiTypography-body1").text.strip()
-            genres = [g.text for g in summary.find_elements(By.CSS_SELECTOR, ".MuiTypography-body1.css-1kdi5wt")]
-
-            drl = summary.find_element(By.CSS_SELECTOR, "p.MuiTypography-body1.css-dmydkl").text.strip()
-            duration = rating = language = ""
+        for s in summaries:
+            t = s.find_element(By.CSS_SELECTOR, "h1.MuiTypography-body1").text.strip()
+            gs = [g.text for g in s.find_elements(By.CSS_SELECTOR, ".MuiTypography-body1.css-1kdi5wt")]
+            drl = s.find_element(By.CSS_SELECTOR, "p.css-dmydkl").text
+            dur = rate = lang = ""
             for part in [p.strip() for p in drl.split(" . ") if p.strip()]:
-                if "h" in part.lower() and any(c.isdigit() for c in part):
-                    duration = part
+                if "h" in part and any(c.isdigit() for c in part):
+                    dur = part
                 elif any(c.isdigit() for c in part) and any(c.isalpha() for c in part):
-                    rating = part
+                    rate = part
                 else:
-                    language = part
-
+                    lang = part
             movies.append({
-                "title":        title,
-                "genres":       genres,
-                "duration":     duration,
-                "rating":       rating,
-                "language":     language,
+                "city":         city_en,
+                "title":        t,
+                "genres":       gs,
+                "duration":     dur,
+                "rating":       rate,
+                "language":     lang,
                 "show_details": []
             })
 
-            # # print PASS 1 info
-            # print("PASS 1")
-            # print("==========================")
-            # print(movies[0])
-        # — PASS 2: for each movie, expand and grab only the location names
+        # — PASS 2/3/4: expand each movie, scrape loc→times→cinema
         for idx in range(len(movies)):
             summary = driver.find_elements(By.CSS_SELECTOR, ".MuiAccordionSummary-root")[idx]
             driver.execute_script("arguments[0].scrollIntoView(true);", summary)
             driver.execute_script("arguments[0].click()", summary)
-            time.sleep(0.8)
+            time.sleep(1)
 
             collapse = summary.find_element(
                 By.XPATH,
                 "./following-sibling::div[contains(@class,'MuiCollapse-root')]"
             )
             details = collapse.find_element(By.CSS_SELECTOR, ".MuiAccordionDetails-root")
+            lines   = collapse.text.splitlines()
 
-            locs = []
-            for loc_group in details.find_elements(By.CSS_SELECTOR, "div.MuiBox-root.css-6z6qye"):
-                try:
-                    name = loc_group.find_element(By.CSS_SELECTOR, "p.css-zgk7x3").text.strip()
-                except:
-                    name = "Unknown"
-                locs.append(name)
-            movies[idx]["locations"] = locs
-
-            # collapse back
-            driver.execute_script("arguments[0].click()", summary)
-            time.sleep(0.4)
-
-        # print("ℹ️ PASS 2 done: locations collected")
-        # # print PASS 2 info
-        # print("PASS 2")
-        # print("==========================")
-        # print(movies[0])
-        # print(movies)
-        # — PASS 3: for each movie and each location, expand and grab cinema & times
-        for idx in range(len(movies)):
-            summary = driver.find_elements(By.CSS_SELECTOR, ".MuiAccordionSummary-root")[idx]
-            driver.execute_script("arguments[0].scrollIntoView(true);", summary)
-            driver.execute_script("arguments[0].click()", summary)
-            time.sleep(0.8)
-
-            collapse = summary.find_element(
-                By.XPATH,
-                "./following-sibling::div[contains(@class,'MuiCollapse-root')]"
-            )
-            details = collapse.find_element(By.CSS_SELECTOR, ".MuiAccordionDetails-root")
-            # We want to know three things:
-            # 1. summary - Summary is literally the box that contains the movie title, generes, rating, language and time
-            # 2. collapse - there seems to be no difference between collapse and details
-            # 3. details - there seems to be no difference between collapse and details
-
-            # print("Summary:")
-            # print(summary)
-            # print(summary.text)
-            # print("Collapse:")
-            # print(collapse)
-            # print(collapse.text)
-            # print("Details:")
-            # print(details)
-            # print(details.text)
-            
-            # PASS 3 – extract every “Read More” ↔ times chunk from collapse.text
-            lines = collapse.text.splitlines()
-
-            locs = movies[idx]["locations"]
-            # find the line‐indices of each location name
-            loc_indices = [i for i, L in enumerate(lines) if L in locs]
-
-            times_per_loc = {}
-            for i, loc in enumerate(locs):
-                start = loc_indices[i]
-                end   = loc_indices[i+1] if i+1 < len(loc_indices) else len(lines)
-                segment = lines[start+1:end]
-
-                # now split that segment by “Read More” markers
-                exp_times = []
-                current   = []
-                for line in segment:
-                    if line == "Read More":
-                        if current:
-                            exp_times.append(current)
-                        current = []
-                    elif "AM" in line or "PM" in line:
-                        current.append(line)
-                if current:
-                    exp_times.append(current)
-
-                times_per_loc[loc] = exp_times
-
-            # attach to movies
-            movies[idx]["show_details"] = [
-                {"location": loc, "times": times_per_loc.get(loc, [])}
-                for loc in locs
+            # collect location names
+            loc_names = [
+                lg.find_element(By.CSS_SELECTOR, "p.css-zgk7x3").text.strip()
+                for lg in details.find_elements(By.CSS_SELECTOR, "div.css-6z6qye")
             ]
 
-        # # print PASS 1 info
-        # print("PASS 3")
-        # print("==========================")
-        # print(movies[0])
+            # map times to each loc
+            idxs = [i for i, L in enumerate(lines) if L in loc_names]
+            times_map = {}
+            for i, loc in enumerate(loc_names):
+                seg = lines[idxs[i]+1 : (idxs[i+1] if i+1<len(idxs) else None)]
+                exps = []
+                cur  = []
+                for L in seg:
+                    if L == "Read More":
+                        if cur:
+                            exps.append(cur)
+                        cur = []
+                    elif "AM" in L or "PM" in L:
+                        cur.append(L)
+                if cur:
+                    exps.append(cur)
+                times_map[loc] = exps
 
-        # — PASS 4: for each movie, grab cinema names and merge with PASS 3 times
-        for idx in range(len(movies)):
-            # build a map of location → times from PASS 3
-            times_map = {
-                entry["location"]: entry["times"]
-                for entry in movies[idx]["show_details"]
-            }
-
-            # 1) scroll up & re-open this movie
-            driver.execute_script("window.scrollTo(0, 0);")
-            time.sleep(0.3)
-            summary = driver.find_elements(By.CSS_SELECTOR, ".MuiAccordionSummary-root")[idx]
-            driver.execute_script("arguments[0].scrollIntoView(true);", summary)
-            driver.execute_script("arguments[0].click()", summary)
-            time.sleep(0.8)
-
-            # 2) grab its details panel
-            collapse = summary.find_element(
-                By.XPATH,
-                "./following-sibling::div[contains(@class,'MuiCollapse-root')]"
-            )
-            details = collapse.find_element(By.CSS_SELECTOR, ".MuiAccordionDetails-root")
-
-            new_show = []
-            loc_groups = details.find_elements(By.CSS_SELECTOR, "div.MuiBox-root.css-6z6qye")
-
-            # 3) for each location, click each Read More to get the NAMES
-            for loc_name, lg in zip(movies[idx]["locations"], loc_groups):
-                cinema_names = []
-                for link in lg.find_elements(By.CSS_SELECTOR, "a.css-scsw1e"):
-                    # click via JS
-                    driver.execute_script("arguments[0].click()", link)
-                    dialog = wait.until(EC.visibility_of_element_located((By.XPATH, "//div[@role='dialog']")))
-                    name = dialog.find_element(By.CSS_SELECTOR, "h4.css-1n9xlo3").text.strip()
-                    # close via JS
-                    close_btn = dialog.find_element(By.XPATH, ".//button")
-                    driver.execute_script("arguments[0].click()", close_btn)
+            # click each Read More to get cinema names
+            show_d = []
+            loc_groups = details.find_elements(By.CSS_SELECTOR, "div.css-6z6qye")
+            for loc, lg in zip(loc_names, loc_groups):
+                cinemas = []
+                for j, a in enumerate(lg.find_elements(By.CSS_SELECTOR, "a.css-scsw1e")):
+                    driver.execute_script("arguments[0].click()", a)
+                    dlg = wait.until(EC.visibility_of_element_located((By.XPATH, "//div[@role='dialog']")))
+                    name = dlg.find_element(By.CSS_SELECTOR, "h4.css-1n9xlo3").text.strip()
+                    driver.execute_script("arguments[0].click()", dlg.find_element(By.XPATH, ".//button"))
                     wait.until(EC.invisibility_of_element_located((By.XPATH, "//div[@role='dialog']")))
-                    cinema_names.append(name)
+                    times = times_map.get(loc, [])
+                    cinemas.append({
+                        "cinema": name,
+                        "times":  times[j] if j < len(times) else []
+                    })
+                show_d.append({"location": loc, "cinema": cinemas})
 
-                # 4) zip names with the times list for this location
-                times_list = times_map.get(loc_name, [])
-                entries = [
-                    {"cinema": cn, "times": times_list[i] if i < len(times_list) else []}
-                    for i, cn in enumerate(cinema_names)
-                ]
+            movies[idx]["show_details"] = show_d
 
-                new_show.append({
-                    "location": loc_name,
-                    "cinema":   entries
-                })
-
-            # 5) replace the old show_details and collapse back
-            movies[idx]["show_details"] = new_show
+            # collapse
             driver.execute_script("arguments[0].click()", summary)
-            time.sleep(0.4)
+            time.sleep(0.5)
 
-        # print("PASS 4 complete: cinema names merged with PASS 3 times")
-        # print(movies[0])
-        # — PASS 5: switch UI to Arabic, optionally re-select city in Arabic, then scrape Arabic titles
-
-        # 1) Go back to the English finder to open the hamburger
-        driver.get("https://www.muvicinemas.com/en/movie-finder")
-        time.sleep(2)
-        hamburger = wait.until(EC.element_to_be_clickable((
-            By.CSS_SELECTOR,
-            "button[aria-label='Menu'], button.css-10ygcul"
-        )))
-        driver.execute_script("arguments[0].click()", hamburger)
-        time.sleep(1)
-
-        # 2) Click “عربي” to switch the UI, if present
-        try:
-            arabic_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[text()='عربي']")))
-            driver.execute_script("arguments[0].click()", arabic_btn)
-            time.sleep(2)
-        except:
-            # already in Arabic (or switch button not found)
-            pass
-
-        # 3) (Optional) If the Arabic city-picker pops up again, choose “الرياض”
-        try:
-            wait.until(EC.element_to_be_clickable((By.XPATH, "//div[text()='الرياض']"))).click()
-            wait.until(EC.element_to_be_clickable((By.ID, "city-submit"))).click()
-            time.sleep(2)
-        except:
-            # city already set, skip
-            pass
-
-        # 4) Pick the same date by day number
-        target_day = day_text.split()[0]
-        for btn in driver.find_elements(By.CSS_SELECTOR, 'button[id^="movie-day-"]'):
-            spans = btn.find_elements(By.TAG_NAME, "span")
-            if len(spans) >= 2 and spans[1].text.strip() == target_day:
-                driver.execute_script("arguments[0].click()", btn)
-                break
-        time.sleep(2)
-
-        # 5) Click “جميع الأوقات” (All Day) filter if it’s visible
-        try:
-            all_day = wait.until(EC.element_to_be_clickable((
-                By.XPATH,
-                "//p[text()='جميع الأوقات']/ancestor::div[contains(@class,'MuiBox-root')]"
-            )))
-            driver.execute_script("arguments[0].click()", all_day)
-            time.sleep(2)
-        except:
-            pass
-
-        # 6) Click “عرض النتائج” (Show Results)
-        show_btn = wait.until(EC.element_to_be_clickable((By.ID, "show-results-button")))
-        driver.execute_script("arguments[0].click()", show_btn)
-        time.sleep(2)
-
-        # 7) Scroll to load all movies
-        last_h = driver.execute_script("return document.body.scrollHeight")
-        while True:
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(2)
-            new_h = driver.execute_script("return document.body.scrollHeight")
-            if new_h == last_h:
-                break
-            last_h = new_h
-
-        # 8) Extract Arabic titles in the same order
-        arabic_titles = [
-            s.find_element(By.CSS_SELECTOR, "h1.MuiTypography-body1").text.strip()
-            for s in driver.find_elements(By.CSS_SELECTOR, ".MuiAccordionSummary-root")
-        ]
-
-        # 9) Merge into your existing movies list
-        for idx, movie in enumerate(movies):
-            movie["title"] = [arabic_titles[idx], movie["title"]]
-
-        print("PASS 5 complete: Arabic titles merged successfully")
         return movies
+
     finally:
         driver.quit()
 
 
 if __name__ == "__main__":
     import pprint
-    data = get_movies_with_showtimes("24 May")
-    pprint.pprint(data)
+    all_data = []
+    for en, ar in CITIES:
+        all_data.extend(get_movies_for_city("24 May", en, ar))
+    pprint.pprint(all_data)
